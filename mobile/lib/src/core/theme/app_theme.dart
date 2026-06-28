@@ -6,16 +6,16 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
-      primarySwatch: Colors.blue,
-      primaryColor: const Color(0xFF0ea5e9),
+      primarySwatch: Colors.red,
+      primaryColor: const Color(0xFFC41C4D),
       scaffoldBackgroundColor: const Color(0xFFffffff),
       fontFamily: 'Inter',
       
       colorScheme: const ColorScheme.light(
-        primary: Color(0xFF0ea5e9),
-        primaryContainer: Color(0xFFe0f2fe),
-        secondary: Color(0xFFa855f7),
-        secondaryContainer: Color(0xFFf3e8ff),
+        primary: Color(0xFFC41C4D),
+        primaryContainer: Color(0xFFF8DDE4),
+        secondary: Color(0xFF4D0A83),
+        secondaryContainer: Color(0xFFE9DBF6),
         surface: Color(0xFFffffff),
         background: Color(0xFFffffff),
         error: Color(0xFFef4444),
@@ -41,7 +41,7 @@ class AppTheme {
       
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF0ea5e9),
+          backgroundColor: const Color(0xFFC41C4D),
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
@@ -56,12 +56,12 @@ class AppTheme {
       
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF0ea5e9),
+          foregroundColor: const Color(0xFFC41C4D),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          side: const BorderSide(color: Color(0xFF0ea5e9)),
+          side: const BorderSide(color: Color(0xFFC41C4D)),
           textStyle: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
@@ -71,7 +71,7 @@ class AppTheme {
       
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: const Color(0xFF0ea5e9),
+          foregroundColor: const Color(0xFFC41C4D),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           textStyle: const TextStyle(
             fontSize: 14,
@@ -93,7 +93,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF0ea5e9), width: 2),
+          borderSide: const BorderSide(color: Color(0xFFC41C4D), width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -117,7 +117,7 @@ class AppTheme {
       
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: Colors.white,
-        selectedItemColor: Color(0xFF0ea5e9),
+        selectedItemColor: Color(0xFFC41C4D),
         unselectedItemColor: Color(0xFF9ca3af),
         type: BottomNavigationBarType.fixed,
         elevation: 8,
@@ -130,16 +130,16 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      primarySwatch: Colors.blue,
-      primaryColor: const Color(0xFF0ea5e9),
+      primarySwatch: Colors.red,
+      primaryColor: const Color(0xFFC41C4D),
       scaffoldBackgroundColor: const Color(0xFF111827),
       fontFamily: 'Inter',
       
       colorScheme: const ColorScheme.dark(
-        primary: Color(0xFF0ea5e9),
-        primaryContainer: Color(0xFF082f49),
-        secondary: Color(0xFFa855f7),
-        secondaryContainer: Color(0xFF3b0764),
+        primary: Color(0xFFC41C4D),
+        primaryContainer: Color(0xFF451221),
+        secondary: Color(0xFFA855F7),
+        secondaryContainer: Color(0xFF3B0764),
         surface: Color(0xFF1f2937),
         background: Color(0xFF111827),
         error: Color(0xFFef4444),
@@ -165,7 +165,7 @@ class AppTheme {
       
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF0ea5e9),
+          backgroundColor: const Color(0xFFC41C4D),
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
@@ -180,12 +180,12 @@ class AppTheme {
       
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF0ea5e9),
+          foregroundColor: const Color(0xFFC41C4D),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          side: const BorderSide(color: Color(0xFF0ea5e9)),
+          side: const BorderSide(color: Color(0xFFC41C4D)),
           textStyle: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
@@ -195,7 +195,7 @@ class AppTheme {
       
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: const Color(0xFF0ea5e9),
+          foregroundColor: const Color(0xFFC41C4D),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           textStyle: const TextStyle(
             fontSize: 14,
@@ -217,7 +217,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF0ea5e9), width: 2),
+          borderSide: const BorderSide(color: Color(0xFFC41C4D), width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -241,7 +241,7 @@ class AppTheme {
       
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: Color(0xFF1f2937),
-        selectedItemColor: Color(0xFF0ea5e9),
+        selectedItemColor: Color(0xFFC41C4D),
         unselectedItemColor: Color(0xFF6b7280),
         type: BottomNavigationBarType.fixed,
         elevation: 8,
