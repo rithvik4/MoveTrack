@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import 'core/theme/app_theme.dart';
+import 'core/gps/gps_service.dart';
 
 const String _apiBaseUrl = String.fromEnvironment(
   'MOVETRACK_API_BASE_URL',
@@ -195,12 +196,30 @@ class ActivityRecord {
     required this.distanceKm,
     required this.duration,
     required this.date,
+    required this.paceMinPerKm,
+    required this.caloriesBurn,
+    required this.routePoints,
   });
 
   final String title;
   final double distanceKm;
   final Duration duration;
   final DateTime date;
+  final double paceMinPerKm;
+  final int caloriesBurn;
+  final List<RoutePoint> routePoints;
+}
+
+class RoutePoint {
+  const RoutePoint({
+    required this.latitude,
+    required this.longitude,
+    required this.timestamp,
+  });
+
+  final double latitude;
+  final double longitude;
+  final DateTime timestamp;
 }
 
 class ChallengeItem {
@@ -435,6 +454,13 @@ class AppState {
     required this.activeActivity,
     required this.joinedChallenges,
     required this.clubs,
+    required this.latitude,
+    required this.longitude,
+    required this.gpsStatus,
+    required this.hasLiveLocation,
+    required this.liveRoute,
+    required this.liveDistanceKm,
+    required this.liveCaloriesBurn,
   });
 
   final bool loggedIn;
@@ -455,6 +481,13 @@ class AppState {
   final String activeActivity;
   final Set<int> joinedChallenges;
   final List<ClubItem> clubs;
+  final double latitude;
+  final double longitude;
+  final String gpsStatus;
+  final bool hasLiveLocation;
+  final List<RoutePoint> liveRoute;
+  final double liveDistanceKm;
+  final int liveCaloriesBurn;
 
   static AppState initial() {
     return AppState(
@@ -481,18 +514,27 @@ class AppState {
           distanceKm: 5.2,
           duration: const Duration(minutes: 29),
           date: DateTime.now().subtract(const Duration(hours: 2)),
+          paceMinPerKm: 5.6,
+          caloriesBurn: 323,
+          routePoints: const <RoutePoint>[],
         ),
         ActivityRecord(
           title: 'City Ride',
           distanceKm: 12.1,
           duration: const Duration(minutes: 41),
           date: DateTime.now().subtract(const Duration(days: 1)),
+          paceMinPerKm: 3.4,
+          caloriesBurn: 750,
+          routePoints: const <RoutePoint>[],
         ),
         ActivityRecord(
           title: 'Recovery Walk',
           distanceKm: 2.1,
           duration: const Duration(minutes: 22),
           date: DateTime.now().subtract(const Duration(days: 2)),
+          paceMinPerKm: 10.5,
+          caloriesBurn: 130,
+          routePoints: const <RoutePoint>[],
         ),
       ],
       challenges: const <ChallengeItem>[
@@ -563,6 +605,13 @@ class AppState {
           accent: Color(0xFF8E44AD),
         ),
       ],
+      latitude: 12.9254,
+      longitude: 77.5501,
+      gpsStatus: 'Searching GPS',
+      hasLiveLocation: false,
+      liveRoute: const <RoutePoint>[],
+      liveDistanceKm: 0,
+      liveCaloriesBurn: 0,
     );
   }
 
@@ -585,6 +634,13 @@ class AppState {
     String? activeActivity,
     Set<int>? joinedChallenges,
     List<ClubItem>? clubs,
+    double? latitude,
+    double? longitude,
+    String? gpsStatus,
+    bool? hasLiveLocation,
+    List<RoutePoint>? liveRoute,
+    double? liveDistanceKm,
+    int? liveCaloriesBurn,
   }) {
     return AppState(
       loggedIn: loggedIn ?? this.loggedIn,
@@ -605,6 +661,13 @@ class AppState {
       activeActivity: activeActivity ?? this.activeActivity,
       joinedChallenges: joinedChallenges ?? this.joinedChallenges,
       clubs: clubs ?? this.clubs,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      gpsStatus: gpsStatus ?? this.gpsStatus,
+      hasLiveLocation: hasLiveLocation ?? this.hasLiveLocation,
+      liveRoute: liveRoute ?? this.liveRoute,
+      liveDistanceKm: liveDistanceKm ?? this.liveDistanceKm,
+      liveCaloriesBurn: liveCaloriesBurn ?? this.liveCaloriesBurn,
     );
   }
 }
@@ -614,6 +677,104 @@ class AppStateNotifier extends StateNotifier<AppState> {
 
   final Random _random = Random();
   final MoveTrackApiService _api = const MoveTrackApiService();
+  final GpsService _gpsService = createGpsService();
+
+  Future<GpsReading?> syncGpsLocation() async {
+    try {
+      final GpsReading? reading = await _gpsService.getCurrentLocation();
+      if (reading == null) {
+        state = state.copyWith(
+          gpsStatus: 'GPS unavailable on this target',
+          hasLiveLocation: false,
+        );
+        return null;
+      }
+
+      state = state.copyWith(
+        latitude: reading.latitude,
+        longitude: reading.longitude,
+        gpsStatus: 'GPS locked',
+        hasLiveLocation: true,
+      );
+      return reading;
+    } catch (_) {
+      state = state.copyWith(
+        gpsStatus: 'GPS unavailable on this target',
+        hasLiveLocation: false,
+      );
+      return null;
+    }
+  }
+
+  Future<void> _captureRoutePoint() async {
+    if (!state.runningSession) {
+      return;
+    }
+
+    final GpsReading? reading = await syncGpsLocation();
+    if (reading == null) {
+      return;
+    }
+
+    _appendRoutePoint(reading);
+  }
+
+  void _appendRoutePoint(GpsReading reading) {
+    final DateTime now = DateTime.now();
+    final RoutePoint nextPoint = RoutePoint(
+      latitude: reading.latitude,
+      longitude: reading.longitude,
+      timestamp: now,
+    );
+
+    if (state.liveRoute.isEmpty) {
+      state = state.copyWith(liveRoute: <RoutePoint>[nextPoint]);
+      return;
+    }
+
+    final RoutePoint previous = state.liveRoute.last;
+    final double deltaKm = _distanceKmBetween(
+      previous.latitude,
+      previous.longitude,
+      nextPoint.latitude,
+      nextPoint.longitude,
+    );
+
+    if (deltaKm < 0.006) {
+      return;
+    }
+
+    final double nextDistanceKm = state.liveDistanceKm + deltaKm;
+    final List<RoutePoint> updatedRoute = <RoutePoint>[...state.liveRoute, nextPoint];
+
+    state = state.copyWith(
+      liveRoute: updatedRoute,
+      liveDistanceKm: nextDistanceKm,
+      liveCaloriesBurn: max<int>(1, (nextDistanceKm * 62).round()),
+      todayDistanceKm: state.todayDistanceKm + deltaKm,
+      totalDistanceKm: state.totalDistanceKm + deltaKm,
+    );
+  }
+
+  double _distanceKmBetween(
+    double startLat,
+    double startLng,
+    double endLat,
+    double endLng,
+  ) {
+    const double earthRadiusKm = 6371.0;
+    final double dLat = _degreesToRadians(endLat - startLat);
+    final double dLng = _degreesToRadians(endLng - startLng);
+    final double a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_degreesToRadians(startLat)) *
+            cos(_degreesToRadians(endLat)) *
+            sin(dLng / 2) *
+            sin(dLng / 2);
+    final double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  double _degreesToRadians(double degrees) => degrees * pi / 180;
 
   Future<void> syncPublicData() async {
     try {
@@ -640,6 +801,8 @@ class AppStateNotifier extends StateNotifier<AppState> {
     } catch (_) {
       // Keep local seeded content when API is unavailable.
     }
+
+    await syncGpsLocation();
   }
 
   void signIn(String name) {
@@ -685,7 +848,14 @@ class AppStateNotifier extends StateNotifier<AppState> {
     if (state.runningSession) {
       return;
     }
-    state = state.copyWith(runningSession: true, sessionSeconds: 0);
+    state = state.copyWith(
+      runningSession: true,
+      sessionSeconds: 0,
+      liveRoute: const <RoutePoint>[],
+      liveDistanceKm: 0,
+      liveCaloriesBurn: 0,
+    );
+    unawaited(_captureRoutePoint());
   }
 
   void stopSession() {
@@ -694,14 +864,18 @@ class AppStateNotifier extends StateNotifier<AppState> {
     }
 
     final double sessionKm =
-        (state.sessionSeconds / 300).clamp(0.2, 4.5).toDouble();
+        state.liveDistanceKm > 0 ? state.liveDistanceKm : (state.sessionSeconds / 300).clamp(0.2, 4.5).toDouble();
     final Duration duration = Duration(seconds: state.sessionSeconds);
+    final int caloriesBurn = max<int>(1, state.liveCaloriesBurn > 0 ? state.liveCaloriesBurn : (sessionKm * 62).round());
 
     final ActivityRecord newActivity = ActivityRecord(
       title: '${state.activeActivity} Session',
       distanceKm: double.parse(sessionKm.toStringAsFixed(1)),
       duration: duration,
       date: DateTime.now(),
+      paceMinPerKm: sessionKm > 0 ? (duration.inSeconds / 60) / sessionKm : 0,
+      caloriesBurn: caloriesBurn,
+      routePoints: state.liveRoute,
     );
 
     final List<ChallengeItem> updatedChallenges = state.challenges
@@ -725,6 +899,9 @@ class AppStateNotifier extends StateNotifier<AppState> {
       stepCount: state.stepCount + (sessionKm * 1300).toInt(),
       activities: <ActivityRecord>[newActivity, ...state.activities],
       challenges: updatedChallenges,
+      liveRoute: const <RoutePoint>[],
+      liveDistanceKm: 0,
+      liveCaloriesBurn: 0,
       notifications: <String>[
         'Session complete: ${sessionKm.toStringAsFixed(1)} km added.',
         ...state.notifications,
@@ -740,14 +917,8 @@ class AppStateNotifier extends StateNotifier<AppState> {
     final int nextSeconds = state.sessionSeconds + 1;
     state = state.copyWith(sessionSeconds: nextSeconds);
 
-    if (nextSeconds % 30 == 0) {
-      final double distanceDelta = 0.08 + (_random.nextDouble() * 0.04);
-      state = state.copyWith(
-        todayDistanceKm: state.todayDistanceKm + distanceDelta,
-        totalDistanceKm: state.totalDistanceKm + distanceDelta,
-        stepCount: state.stepCount + 110,
-        calories: state.calories + 3,
-      );
+    if (nextSeconds % 2 == 0) {
+      unawaited(_captureRoutePoint());
     }
   }
 
@@ -1035,7 +1206,7 @@ class HomeTab extends ConsumerWidget {
           children: <Widget>[
             _HomeHeader(name: state.profile.name),
             const SizedBox(height: 14),
-            const _PromoBanner(),
+            _HomeCommandDeck(state: state),
             const SizedBox(height: 14),
             _QuickLinksRow(
               onTapProfile: () {
@@ -1046,16 +1217,18 @@ class HomeTab extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
             const Text(
-              'Hot Deals, Hot Savings',
+              'Momentum Board',
               style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, height: 1),
             ),
             const SizedBox(height: 3),
-            const Text(
-              'Curated offers for your next ride',
+            Text(
+              state.hasLiveLocation
+                  ? 'GPS is live. Build your route and chase the next checkpoint.'
+                  : 'Grant location access to unlock route-first tracking.',
               style: TextStyle(color: Color(0xFF707582), fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
-            const _DealsScroller(),
+            _RouteInsightRow(state: state),
             const SizedBox(height: 16),
             _ActivitySnippet(state: state),
             const SizedBox(height: 16),
@@ -1137,6 +1310,7 @@ class _RecordTabState extends ConsumerState<RecordTab> {
   @override
   void initState() {
     super.initState();
+    Future<void>.microtask(() => ref.read(appStateProvider.notifier).syncGpsLocation());
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
         return;
@@ -1161,11 +1335,34 @@ class _RecordTabState extends ConsumerState<RecordTab> {
       body: SafeArea(
         child: Column(
           children: <Widget>[
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text(
-                'Record',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 36),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: <Widget>[
+                  const Text(
+                    'Field Mode',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 36),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: state.hasLiveLocation
+                          ? const Color(0xFFDDF6E8)
+                          : const Color(0xFFFFE8D9),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      state.gpsStatus,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: state.hasLiveLocation
+                            ? const Color(0xFF1D7B4F)
+                            : const Color(0xFF9B5C19),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 10),
@@ -1179,15 +1376,45 @@ class _RecordTabState extends ConsumerState<RecordTab> {
                       gradient: const LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: <Color>[Color(0xFFE4E8EE), Color(0xFFD7DCE6)],
+                        colors: <Color>[Color(0xFF0A172B), Color(0xFF123A5B), Color(0xFF1C7C6D)],
                       ),
                     ),
-                    child: const Center(
-                      child: Icon(
-                        Icons.map_outlined,
-                        size: 120,
-                        color: Color(0xFFBAC2CF),
-                      ),
+                    child: Stack(
+                      children: <Widget>[
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: _RadarPainter(),
+                          ),
+                        ),
+                        Center(
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFF5CF2C6),
+                              boxShadow: <BoxShadow>[
+                                BoxShadow(
+                                  color: const Color(0xFF5CF2C6).withValues(alpha: 0.45),
+                                  blurRadius: 22,
+                                  spreadRadius: 6,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: 18,
+                          top: 18,
+                          child: _GpsTelemetryCard(state: state),
+                        ),
+                        Positioned(
+                          left: 14,
+                          right: 14,
+                          bottom: 14,
+                          child: _MapHistoryStrip(activities: state.activities),
+                        ),
+                      ],
                     ),
                   ),
                   Positioned(
@@ -1201,15 +1428,19 @@ class _RecordTabState extends ConsumerState<RecordTab> {
                   Positioned(
                     left: 22,
                     bottom: 22,
-                    child: Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(26),
-                        border: Border.all(color: const Color(0xFFD9DCE3)),
+                    child: InkWell(
+                      onTap: notifier.syncGpsLocation,
+                      borderRadius: BorderRadius.circular(26),
+                      child: Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(color: const Color(0xFFD9DCE3)),
+                        ),
+                        child: const Icon(Icons.my_location_rounded),
                       ),
-                      child: const Icon(Icons.my_location_rounded),
                     ),
                   ),
                 ],
@@ -1223,9 +1454,10 @@ class _RecordTabState extends ConsumerState<RecordTab> {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
               ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Text(
-                    '${state.todayDistanceKm.toStringAsFixed(1)} km',
+                    '${(state.runningSession ? state.liveDistanceKm : state.todayDistanceKm).toStringAsFixed(1)} km',
                     style: const TextStyle(
                       color: Color(0xFFC41C4D),
                       fontWeight: FontWeight.w900,
@@ -1271,11 +1503,50 @@ class _RecordTabState extends ConsumerState<RecordTab> {
                         ),
                       ),
                       _StatBlock(
-                        title: 'Speed',
-                        value:
-                            '${(state.todayDistanceKm / max(1, duration.inMinutes) * 60).toStringAsFixed(1)}',
-                        suffix: 'km/h',
+                        title: 'Pace',
+                        value: state.runningSession && state.liveDistanceKm > 0
+                            ? (duration.inMinutes / max(0.1, state.liveDistanceKm)).toStringAsFixed(1)
+                            : (duration.inMinutes / max(0.1, state.todayDistanceKm)).toStringAsFixed(1),
+                        suffix: 'min/km',
                         align: CrossAxisAlignment.end,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: _StatBlock(
+                          title: 'Calories',
+                          value: '${state.runningSession ? state.liveCaloriesBurn : state.calories}',
+                          suffix: 'kcal',
+                          align: CrossAxisAlignment.start,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _StatBlock(
+                          title: 'Route',
+                          value: '${state.liveRoute.length}',
+                          suffix: 'points',
+                          align: CrossAxisAlignment.end,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: <Widget>[
+                      const Text(
+                        'Live session',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                      ),
+                      const Spacer(),
+                      Text(
+                        state.runningSession ? 'Recording' : 'Ready to start',
+                        style: const TextStyle(
+                          color: Color(0xFF707582),
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -1975,6 +2246,313 @@ class _QuickLink {
   final VoidCallback? onTap;
 }
 
+class _HomeCommandDeck extends StatelessWidget {
+  const _HomeCommandDeck({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[Color(0xFF07111F), Color(0xFF123A57), Color(0xFF1F8B73)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  state.gpsStatus,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              const Icon(Icons.explore_rounded, color: Colors.white),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Route First.\nChaos Later.',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 34,
+              height: 0.95,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            state.hasLiveLocation
+                ? 'Locked at ${state.latitude.toStringAsFixed(4)}, ${state.longitude.toStringAsFixed(4)}'
+                : 'Allow GPS access to convert this dashboard into a live field console.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.82),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _CommandMetric(
+                  label: 'Goal',
+                  value: '${state.profile.goalKm.toStringAsFixed(1)} km',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _CommandMetric(
+                  label: 'Streak',
+                  value: '${state.currentStreak} days',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _CommandMetric(
+                  label: 'Mode',
+                  value: state.activeActivity,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommandMetric extends StatelessWidget {
+  const _CommandMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF6A6F7D),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteInsightRow extends StatelessWidget {
+  const _RouteInsightRow({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: _InsightCard(
+            title: 'Latitude',
+            value: state.latitude.toStringAsFixed(4),
+            icon: Icons.north_rounded,
+            accent: const Color(0xFF0F766E),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _InsightCard(
+            title: 'Longitude',
+            value: state.longitude.toStringAsFixed(4),
+            icon: Icons.east_rounded,
+            accent: const Color(0xFF7C3AED),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _InsightCard(
+            title: 'Calories',
+            value: '${state.calories}',
+            icon: Icons.local_fire_department_rounded,
+            accent: const Color(0xFFDC2626),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InsightCard extends StatelessWidget {
+  const _InsightCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.accent,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icon, color: accent),
+          const SizedBox(height: 16),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF6A6F7D),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GpsTelemetryCard extends StatelessWidget {
+  const _GpsTelemetryCard({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 168,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'TELEMETRY',
+            style: TextStyle(
+              color: Colors.white70,
+              letterSpacing: 1.3,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            state.activeActivity.toUpperCase(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              fontSize: 22,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'LAT ${state.latitude.toStringAsFixed(4)}',
+            style: const TextStyle(color: Colors.white),
+          ),
+          Text(
+            'LNG ${state.longitude.toStringAsFixed(4)}',
+            style: const TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RadarPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    final Offset center = Offset(size.width / 2, size.height / 2);
+    final List<double> radii = <double>[48, 96, 144, 196];
+    for (final double radius in radii) {
+      canvas.drawCircle(center, radius, gridPaint);
+    }
+
+    canvas.drawLine(Offset(center.dx, 0), Offset(center.dx, size.height), gridPaint);
+    canvas.drawLine(Offset(0, center.dy), Offset(size.width, center.dy), gridPaint);
+
+    final Paint sweepPaint = Paint()
+      ..shader = RadialGradient(
+        colors: <Color>[
+          const Color(0x665CF2C6),
+          const Color(0x115CF2C6),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: 150));
+
+    canvas.drawCircle(center, 150, sweepPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class _DealsScroller extends StatelessWidget {
   const _DealsScroller();
 
@@ -2130,13 +2708,144 @@ class _ActivitySnippet extends StatelessWidget {
                 style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900),
               ),
               Text(
-                '${activity.date.day}/${activity.date.month}/${activity.date.year} ${activity.date.hour.toString().padLeft(2, '0')}:${activity.date.minute.toString().padLeft(2, '0')}',
+                '${activity.title} · ${activity.distanceKm.toStringAsFixed(1)} km · ${activity.caloriesBurn} kcal',
+                style: const TextStyle(color: Color(0xFF707582), fontWeight: FontWeight.w600),
+              ),
+              Text(
+                '${activity.paceMinPerKm.toStringAsFixed(1)} min/km · ${activity.routePoints.length} route points',
                 style: const TextStyle(color: Color(0xFF707582), fontWeight: FontWeight.w600),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _SessionHistoryCard extends StatelessWidget {
+  const _SessionHistoryCard({required this.activity});
+
+  final ActivityRecord activity;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 184,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFFF5F6FA),
+        border: Border.all(color: const Color(0xFFD9DCE3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            activity.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${activity.distanceKm.toStringAsFixed(1)} km',
+            style: const TextStyle(
+              color: Color(0xFFC41C4D),
+              fontWeight: FontWeight.w900,
+              fontSize: 22,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${activity.paceMinPerKm.toStringAsFixed(1)} min/km',
+            style: const TextStyle(color: Color(0xFF707582), fontWeight: FontWeight.w600),
+          ),
+          const Spacer(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Text(
+                '${activity.caloriesBurn} kcal',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              Text(
+                '${activity.routePoints.length} pts',
+                style: const TextStyle(color: Color(0xFF707582), fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapHistoryStrip extends StatelessWidget {
+  const _MapHistoryStrip({required this.activities});
+
+  final List<ActivityRecord> activities;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Text(
+                'Map history',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${activities.length} saved',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (activities.isEmpty)
+            const Text(
+              'Your workout history will appear here on the map.',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            )
+          else
+            SizedBox(
+              height: 88,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: min(3, activities.length),
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (BuildContext context, int index) {
+                  final ActivityRecord activity = activities[index];
+                  return _SessionHistoryCard(activity: activity);
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -2489,26 +3198,28 @@ class _ClubCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             CircleAvatar(
-              radius: 26,
+              radius: 24,
               backgroundColor: club.accent.withValues(alpha: 0.15),
               backgroundImage: NetworkImage(imageUrl),
             ),
-            const SizedBox(height: 10),
-            Text(
-              club.name,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 30, height: 1),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            const SizedBox(height: 8),
+            Expanded(
+              child: Text(
+                club.name,
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 24, height: 1),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            const SizedBox(height: 6),
             Text(
               '${club.memberCount} members',
               style: const TextStyle(
                 color: Color(0xFF707582),
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
